@@ -1,4 +1,18 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}
+/* Performance safeguards: same layout, fewer off-screen/compositor animations. */
+@media (hover:none), (pointer:coarse) {
+  .st .art img.kb { animation:artin .35s both !important; }
+  .bro-scr::after, .st .phs::after, .ph::after { animation:none !important; }
+  .stb .mq { animation-duration:45s; }
+  .sts .small { animation:none; }
+  .msg-in { backdrop-filter:none; -webkit-backdrop-filter:none; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .st .art img, .st .art img.kb, .st .cine .cs.on .art,
+  .st .wdi, .stb .mq, .sts .small, .ph::after,
+  .bro-scr::after, .hl .gold .wi { animation:none !important; }
+}
+</style></head><body>
 <title>Lee Visuals Media</title>
 <link rel="icon" type="image/png" href="img/favicon.png">
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -504,14 +518,33 @@ const eout=t=>1-Math.pow(1-t,3);
 const pad=(n,l=2)=>String(n).padStart(l,'0');
 const S={y:0};
 const subs=new Set();
-let ticking=false;
-function loopAll(now){S.y=window.scrollY;subs.forEach(f=>f(now));requestAnimationFrame(loopAll);}
+let ticking=false, frameId=0, lastFrame=0;
+const LOW_POWER=window.matchMedia('(max-width: 900px), (pointer: coarse)').matches;
+const FRAME_INTERVAL=LOW_POWER?1000/30:1000/60;
+function loopAll(now){
+  if(document.hidden || subs.size===0){ticking=false;frameId=0;return;}
+  frameId=requestAnimationFrame(loopAll);
+  if(now-lastFrame<FRAME_INTERVAL)return;
+  lastFrame=now;
+  S.y=window.scrollY;
+  subs.forEach(f=>f(now));
+}
+function startTicker(){
+  if(!ticking && !document.hidden && subs.size){
+    ticking=true;lastFrame=0;frameId=requestAnimationFrame(loopAll);
+  }
+}
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){
+    if(frameId)cancelAnimationFrame(frameId);
+    frameId=0;ticking=false;
+  }else startTicker();
+});
 function useTicker(fn){
   const r=useRef(fn);r.current=fn;
   useEffect(()=>{
-    const f=n=>r.current(n);subs.add(f);
-    if(!ticking){ticking=true;requestAnimationFrame(loopAll);}
-    return()=>{subs.delete(f);};
+    const f=n=>r.current(n);subs.add(f);startTicker();
+    return()=>{subs.delete(f);if(!subs.size && frameId){cancelAnimationFrame(frameId);frameId=0;ticking=false;}};
   },[]);
 }
 
@@ -553,12 +586,21 @@ function Art({k,className='',pos='50% 50%',alt='',kb=true}){
 const Words=({t,delay=0,it=-1})=>html`<span className="wd">${t.split('|').map((ln,li)=>html`<span key=${li} className=${'wl'+(li===it?' it':'')}>${ln.split(' ').map((w,i)=>html`<span key=${i} className="wdo"><span className="wdi" style=${{animationDelay:(delay+i*90+li*170)+'ms'}}>${w}</span></span>${' '}`)}</span>`)}</span>`;
 function Cine({slides,ms=5600,fill=false,ratio='4/5'}){
   const [s,setS]=useState({i:0,p:-1});
+  const holder=useRef(null);
   useEffect(()=>{
-    if(REDUCE)return;
-    const t=setInterval(()=>setS(x=>({i:(x.i+1)%slides.length,p:x.i})),ms);
-    return()=>clearInterval(t);
-  },[]);
-  return html`<div className=${'cine'+(fill?' fill':'')} style=${fill?undefined:{aspectRatio:ratio}} aria-hidden="true">
+    if(REDUCE || slides.length<2)return;
+    let timer=null,visible=false;
+    const stop=()=>{if(timer!==null){clearInterval(timer);timer=null;}};
+    const sync=()=>{
+      if(!visible || document.hidden){stop();return;}
+      if(timer===null)timer=setInterval(()=>setS(x=>({i:(x.i+1)%slides.length,p:x.i})),ms);
+    };
+    const observer=new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;sync();},{rootMargin:'100px'});
+    if(holder.current)observer.observe(holder.current);
+    document.addEventListener('visibilitychange',sync);
+    return()=>{stop();observer.disconnect();document.removeEventListener('visibilitychange',sync);};
+  },[ms,slides.length]);
+  return html`<div ref=${holder} className=${'cine'+(fill?' fill':'')} style=${fill?undefined:{aspectRatio:ratio}} aria-hidden="true">
     ${slides.map((sl,n)=>html`<div key=${n} className=${'cs'+(n===s.i?' on':n===s.p?' off':'')}>
       <${Art} k=${sl.k} className="cfill"/>
       <div className="ct"><span className="cn">${pad(n+1)} / ${pad(slides.length)}</span><${Words} t=${sl.t} delay=${350}/></div></div>`)}
